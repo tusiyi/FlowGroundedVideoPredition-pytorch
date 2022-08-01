@@ -60,7 +60,7 @@ class SceneFlowDataset(Dataset):
         # new_w, new_h = int(w * scale), int(h * scale)
         new_w, new_h = self.image_size, self.image_size
         image = image.resize((new_w, new_h), resample=PIL.Image.BICUBIC)
-        image = np.asarray(image) / 255.
+        image = np.asarray(image) / 255.  # H W C
 
         return image
 
@@ -109,9 +109,16 @@ class SceneFlowDataset(Dataset):
         images.append(img)
 
         if self.train_vae:
+            true_flows = flows
             # 训练VAE时，需将初始图像帧x0(images[0]), concat到每一个flow中（通道维）
             for i in range(self.seq_len):
                 flows[i] = np.concatenate([images[0], flows[i]], axis=2)
+
+            return {
+                'image0': torch.as_tensor(images[0].copy()).permute(2, 0, 1).contiguous().float(),  # C H W
+                'flows': torch.as_tensor(true_flows.copy()).permute(3, 0, 1, 2).contiguous().float(),  # C,T=seq_len,H W
+                'flows_add': torch.as_tensor(flows.copy()).permute(3, 0, 1, 2).contiguous().float()
+            }
 
         return {
             'images': torch.as_tensor(images.copy()).permute(0, 3, 1, 2).contiguous().float(),  # T=seq_len+1, C H W
