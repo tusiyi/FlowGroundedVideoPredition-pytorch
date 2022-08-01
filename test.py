@@ -31,7 +31,7 @@ def get_args():
     parser.add_argument('--image_size', type=int, default=128, help='Image size.')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints', help='Directory to save models.')
 
-    return parser
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
@@ -78,6 +78,7 @@ if __name__ == '__main__':
             # feature loss
             true_feats = get_features(vgg19, true_image)
             pred_feats = get_features(vgg19, pred_image)
+            # loss = loss + criterion(pred_feats, true_feats)
             for j in range(5):
                 loss += criterion(pred_feats[j], true_feats[j])
 

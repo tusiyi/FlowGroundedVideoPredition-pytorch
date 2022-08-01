@@ -25,7 +25,7 @@ class SceneFlowDataset(Dataset):
                 with every flow in channel dimension, but training flow2rgb do not need that operation)
     """
     def __init__(self, image_dir, flow_dir, random_seed, flow_prefix='',
-                 flow_suffix='', seq_len=16, train_vae=False, **kwargs):
+                 flow_suffix='', seq_len=16, train_vae=False, image_size=128, **kwargs):
         super(SceneFlowDataset, self).__init__(**kwargs)
         self.image_dir = image_dir
         self.flow_dir = flow_dir
@@ -34,6 +34,7 @@ class SceneFlowDataset(Dataset):
         self.suffix = flow_suffix
         self.seq_len = seq_len
         self.train_vae = train_vae
+        self.image_size = image_size
 
         self.images = os.listdir(image_dir)
         # self.flows = os.listdir(flow_dir)
@@ -57,7 +58,7 @@ class SceneFlowDataset(Dataset):
         # image : PIL Image format
         # w, h = image.size
         # new_w, new_h = int(w * scale), int(h * scale)
-        new_w, new_h = 128, 128
+        new_w, new_h = self.image_size, self.image_size
         image = image.resize((new_w, new_h), resample=PIL.Image.BICUBIC)
         image = np.asarray(image) / 255.
 
@@ -66,7 +67,7 @@ class SceneFlowDataset(Dataset):
     def flow_preprocess(self, flow):
         # flow H W C=3(channel 3 is all zero)
         # resize
-        new_w, new_h = 128, 128
+        new_w, new_h = self.image_size, self.image_size
         c1 = flow[:, :, 0]
         c2 = flow[:, :, 1]
         image_c1 = Image.fromarray(c1)  # 转为Image便于resize

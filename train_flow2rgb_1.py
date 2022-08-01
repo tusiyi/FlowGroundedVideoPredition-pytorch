@@ -9,17 +9,19 @@ import torch.optim as optim
 from torch.utils.data import random_split, DataLoader
 import torchvision.models as models
 
-import model.vgg_conv4_1 as vgg
+from model.vgg_conv4_1 import FlowToRGB
 from data.dataset import SceneFlowDataset
 from utils.vgg19 import get_features
-from utils.evaluate import evaluate
+from utils.evaluate_1 import evaluate
+
+torch.autograd.set_detect_anomaly(True)
 
 
-def feature_loss(net, true_img, pred_img):
+def feature_loss(feat_net, true_img, pred_img):
     feat_loss = 0
     with torch.no_grad():
-        t_feats = get_features(net, true_img)
-        p_feats = get_features(net, pred_img)
+        t_feats = get_features(feat_net, true_img)
+        p_feats = get_features(feat_net, pred_img)
 
     base_loss = nn.MSELoss()
     for j in range(5):
@@ -28,9 +30,7 @@ def feature_loss(net, true_img, pred_img):
     return feat_loss
 
 
-def train(net_Content,
-          net_FLow,
-          net_Decode,
+def train(net,
           net_vgg,
           args,
           on_device):
@@ -59,18 +59,13 @@ def train(net_Content,
     """)
 
     # optimizers and loss
-    optimizer_netC = optim.Adam(net_Content.parameters(), lr=args.lr, eps=1e-8)
-    optimizer_netF = optim.Adam(net_FLow.parameters(), lr=args.lr, eps=1e-8)
-    optimizer_netD = optim.Adam(net_Decode.parameters(), lr=args.lr, eps=1e-8)
+    optimizer = optim.Adam(net.parameters(), lr=args.lr, eps=1e-8)
     criterion = nn.MSELoss()
-    # vgg19 = models.vgg19(pretrained=True)
     global_step = 0
 
     # train step
     for epoch in range(1, args.epochs + 1):
-        net_Content.train()
-        net_FLow.train()
-        net_Decode.train()
+        net.train()
         epoch_loss = 0
 
         with tqdm.tqdm(total=n_train * args.seq_len, desc=f'Epoch {epoch}/{args.epochs}') as pbar:
@@ -84,58 +79,56 @@ def train(net_Content,
                 # multiple steps for sequence
                 for i in range(args.seq_len):
                     true_image = images[:, i + 1, ...]
-                    img_feat = net_Content(image0)
-                    flow_feat = net_FLow(flows[:, i, ...])
-                    pred_image = net_Decode(img_feat, flow_feat)
+                    pred_image = net(image0, flows[:, i, ...])
                     # reconstruction loss
                     loss = criterion(pred_image, true_image)
                     # feature loss
                     true_feats = get_features(net_vgg, true_image)
                     pred_feats = get_features(net_vgg, pred_image)
+                    # f1_loss = criterion(pred_feats[0], true_feats[0])
+                    # f2_loss = criterion(pred_feats[1], true_feats[1])
+                    # f3_loss = criterion(pred_feats[2], true_feats[2])
+                    # f4_loss = criterion(pred_feats[3], true_feats[3])
+                    # f5_loss = criterion(pred_feats[4], true_feats[4])
                     for j in range(5):
                         loss = loss + args.lambda_ * criterion(pred_feats[j], true_feats[j])
                     # updates
-                    optimizer_netC.zero_grad()
-                    optimizer_netF.zero_grad()
-                    optimizer_netD.zero_grad()
-                    loss.backward(retain_graph=True)
-                    optimizer_netC.step()
-                    optimizer_netF.step()
-                    optimizer_netD.step()
+                    # loss = loss + args.lambda_ * (f1_loss + f2_loss + f3_loss + f4_loss + f5_loss)
+                    optimizer.zero_grad()
+                    # loss.backward(retain_graph=True)
+                    loss.backward()
+                    optimizer.step()
 
                     global_step += 1
                     seq_loss += loss.item()
                     pbar.update(args.batch_size)
-                    # update image0
-                    image0 = pred_image
+                    # # update image0
+                    image0 = pred_image.detach()
+                    # image0 = images[:, i + 1, ...]
 
                     experiment.log({
                         'train loss': loss.item(),
                         'step': global_step,
                         'epoch': epoch,
                     })
-
-                pbar.set_postfix(**{'loss (batch)': seq_loss})
+                    pbar.set_postfix(**{'loss (batch)': loss.item()})
+                # pbar.set_postfix(**{'loss (batch)': seq_loss})
                 experiment.log({})
 
-                # validating step (only reconstruction loss)
-                val_loss = evaluate(net_Content, net_FLow, net_Decode, val_loader, device, args)
-                experiment.log({
-                    'train loss(batch)': seq_loss,
-                    'validate loss(batch)': val_loss,
-                    'step': global_step,
-                    'epoch': epoch,
-                    'true_image(last frame)': wandb.Image(true_image[0].float().cpu()),
-                    'pred_image(last frame)': wandb.Image(pred_image[0].float().cpu()),
-                })
+                if global_step % (args.seq_len * 10) == 0:
+                    # validating step (only reconstruction loss)
+                    val_loss = evaluate(net, val_loader, device, args)
+                    experiment.log({
+                        'train loss(batch)': seq_loss,
+                        'validate loss(batch)': val_loss,
+                        'step': global_step,
+                        'epoch': epoch,
+                        'true_image(last frame)': wandb.Image(true_image[0].float().cpu()),
+                        'pred_image(last frame)': wandb.Image(pred_image[0].float().cpu()),
+                    })
         # save model
         if epoch % 5 == 0:
-            torch.save({
-                'netC': netC,
-                'netF': netF,
-                'netD': netD,
-            },
-                '%s/{epoch}.pth' % args.checkpoints)
+            torch.save(net, f'{epoch}.pth')
             logging.info(f'No.{epoch} model saved.')
 
 
@@ -155,9 +148,9 @@ def get_args():
     parser.add_argument('--train_vae', type=bool, default=False, help='Indicator of training VAE or not.')
     parser.add_argument('--val_percent', type=float, default=0.1, help='Percentage of validation set.')
     parser.add_argument('--batch_size', type=int, default=2, help='Batch size.')
-    parser.add_argument('--lr', type=float, default=0.0001, help='Learning rate.')
+    parser.add_argument('--lr', type=float, default=0.00005, help='Learning rate.')
     parser.add_argument('--beta', type=float, default=0.9, help='Momentum term for Adam.')
-    parser.add_argument('--image_size', type=int, default=128, help='Image size.')
+    parser.add_argument('--image_size', type=int, default=256, help='Image size.')
     parser.add_argument('--checkpoints', type=str, default='./checkpoints', help='Directory to save models.')
     parser.add_argument('--lambda_', type=float, default=0.1, help='Weight to balance two losses.')
 
@@ -173,6 +166,7 @@ def load_data(args):
                                flow_prefix=args.flow_prefix,
                                flow_suffix=args.flow_suffix,
                                train_vae=args.train_vae,
+                               image_size=args.image_size,
                                )
     # split dataset into train and validate
     n_val = int(len(dataset) * args.val_percent)
@@ -192,20 +186,18 @@ if __name__ == '__main__':
     device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
 
     if args_.pretrained != '':
-        pretrained = torch.load(args_.pretrained, map_location=device)
-        netC = pretrained['netC']
-        netF = pretrained['netF']
-        netD = pretrained['netD']
+        net = torch.load(args_.pretrained, map_location=device)
         print(f'Loaded models from file {args_.pretrained}.')
     else:
         # model definition
-        netC = vgg.Conv4_1(in_channels=3, channels=256)
-        netF = vgg.Conv4_1(in_channels=2, channels=256)
-        netD = vgg.InvertConcatConv4_1(channels=256, out_channels=3)
+        net = FlowToRGB(
+            img_channels=3,
+            flow_channels=2,
+            out_channels=3,
+            common_channels=256
+        )
 
-        netC.to(device=device)
-        netF.to(device=device)
-        netD.to(device=device)
+        net.to(device=device)
         print(f'Initialize models from scratch.')
 
     vgg19 = models.vgg19(pretrained=True)
@@ -215,18 +207,11 @@ if __name__ == '__main__':
         os.mkdir(args_.checkpoints)
 
     try:
-        train(net_Content=netC,
-              net_FLow=netF,
-              net_Decode=netD,
+        train(net=net,
               net_vgg=vgg19,
               args=args_,
               on_device=device,
               )
 
     except KeyboardInterrupt:
-        torch.save({
-            'netC': netC,
-            'netF': netF,
-            'netD': netD,
-                },
-            '%s/Interrupt.pth' % args_.checkpoints)
+        torch.save(net, f'{args_.checkpoints}/Interrupt.pth')
