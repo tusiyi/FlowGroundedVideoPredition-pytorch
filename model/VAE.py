@@ -41,12 +41,15 @@ class CAddTable(nn.Module):
 
 class Gaussian(nn.Module):
     """ layer for nn.Gaussian(0, 1) """
-    def __init__(self, **kwargs):
+    def __init__(self, device, **kwargs):
         super(Gaussian, self).__init__(**kwargs)
+        self.device = device
 
     def forward(self):
         m = torch.distributions.normal.Normal(torch.tensor([0.0]), torch.tensor([1.0]))
-        return m.sample()
+        sample_z = m.sample()
+        sample_z = sample_z.to(self.device)
+        return sample_z
 
 
 ###############################################################################################
@@ -97,15 +100,19 @@ class VolEncoder(nn.Module):
 
     def forward(self, x):
         x = self.net(x)
-        return self.z1(x), self.z2(x)
+        out1 = self.z1(x).view(-1, self.z_dim, 1, 1, 1)
+        out2 = self.z2(x).view(-1, self.z_dim, 1, 1, 1)
+        return out1, out2
 
 
 class VolSampler(nn.Module):
-    def __init__(self):
+    def __init__(self, device):
         super(VolSampler, self).__init__()
+        self.device = device
+
         self.mul_constant = MulConstant(0.5)
         self.exp = Exp()
-        self.gaussian = Gaussian()
+        self.gaussian = Gaussian(self.device)
         self.mul = CMulTable()
         self.add = CAddTable()
         self.std = nn.Sequential(
@@ -186,4 +193,5 @@ class ImEncoder(nn.Module):
 
     def forward(self, x):
         x = self.net(x)
-        return x.view(self.z_dim, 1, 1, 1)
+        # return x
+        return x.view(-1, self.z_dim, 1, 1, 1)

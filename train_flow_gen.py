@@ -44,7 +44,7 @@ def train(net_Encoder,
 
     # optimizers and loss
     optimizer_netE = optim.Adam(net_Encoder.parameters(), lr=args.lr, eps=1e-8)
-    optimizer_netS = optim.Adam(net_Sampler.parameters(), lr=args.lr, eps=1e-8)
+    # optimizer_netS = optim.Adam(net_Sampler.parameters(), lr=args.lr, eps=1e-8)
     optimizer_netD = optim.Adam(net_Decoder.parameters(), lr=args.lr, eps=1e-8)
     optimizer_netI = optim.Adam(net_ImEncoder.parameters(), lr=args.lr, eps=1e-8)
     criterion = nn.MSELoss()
@@ -77,12 +77,12 @@ def train(net_Encoder,
 
                 # updates
                 optimizer_netE.zero_grad()
-                optimizer_netS.zero_grad()
+                # optimizer_netS.zero_grad()
                 optimizer_netD.zero_grad()
                 optimizer_netI.zero_grad()
                 loss.backward()
                 optimizer_netE.step()
-                optimizer_netS.step()
+                # optimizer_netS.step()
                 optimizer_netD.step()
                 optimizer_netI.step()
 
@@ -100,7 +100,7 @@ def train(net_Encoder,
             experiment.log({})
 
         # save model
-        if epoch % 5 == 0:
+        if epoch % 1 == 0:
             torch.save({
                 'netE': net_Encoder,
                 'netS': net_Sampler,
@@ -179,7 +179,7 @@ if __name__ == '__main__':
     else:
         # model definition
         netE = VolEncoder(channels=args_.nc + args_.nf, naf=args_.naf, z_dim=args_.z_dim)
-        netS = VolSampler()
+        netS = VolSampler(device)
         netD = VolDecoder(channels=args_.nf, ngf=args_.ngf, z_dim=args_.z_dim)
         netI = ImEncoder(channels=args_.nc, naf=args_.naf, z_dim=args_.z_dim)
 
