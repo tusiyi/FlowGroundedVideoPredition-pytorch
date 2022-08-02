@@ -2,8 +2,6 @@
 a personal implementation of Flow Ground Video Prediction
 
 
-a personal implementation of Flow Ground Video Prediction
-
 Paper: https://arxiv.org/abs/1807.09755
 (full title: Flow-Grounded Spatial-Temporal Video Prediction from Still Images)
 
